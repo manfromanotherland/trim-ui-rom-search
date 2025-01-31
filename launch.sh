@@ -151,10 +151,15 @@ search_screen() {
         fi
 
         # Show results and capture selection
+        num_results=$(wc -l < "$results_file")
         selected=$("$DIR/bin/minui-list-tg5040" \
             --file "$results_file" \
             --format text \
-            --header "Search Results: $search_term")
+            --header "$num_results search results for ‘$search_term’" \
+            --confirm-button "A" \
+            --confirm-text "Open" \
+            --cancel-button "B" \
+            --cancel-text "Back")
         list_exit=$?
         echo "Selected: $selected" >> "$DIR/log/launch.log"
         echo "List exit code: $list_exit" >> "$DIR/log/launch.log"
