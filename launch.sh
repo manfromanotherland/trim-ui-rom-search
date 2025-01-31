@@ -39,19 +39,25 @@ CACHE_FILE="$CACHE_DIR/cache.txt"
 mkdir -p "$DIR/log"
 [ -f "$DIR/log/launch.log" ] && mv "$DIR/log/launch.log" "$DIR/log/launch.log.old"
 
-build_cache() {
-    mkdir -p "$CACHE_DIR"
-    find "$SDCARD_PATH/Roms" -maxdepth 2 -type f \
-        ! -path "*.disabled/*" \
-        ! -path "*/PORTS/*" \
-        ! -name ".*" > "$CACHE_FILE.tmp"
-    mv "$CACHE_FILE.tmp" "$CACHE_FILE"
+clean_rom_name() {
+    basename "${1%.*}"
 }
 
-# Build cache in background if needed
-if [ ! -f "$CACHE_FILE" ]; then
-    build_cache &
-fi
+add_to_recent() {
+    rom_path="$1"
+    rom_path_rel="${rom_path#$SDCARD_PATH}"  # Remove SDCARD_PATH prefix
+    display_name=$(clean_rom_name "$rom_path")
+
+    # Create recent.txt if it doesn't exist
+    recent_file="$SDCARD_PATH/.userdata/shared/.minui/recent.txt"
+    mkdir -p "$(dirname "$recent_file")"
+    touch "$recent_file"
+
+    # Add new entry at the top
+    echo -e "${rom_path_rel}\t${display_name}" > "$recent_file.tmp"
+    cat "$recent_file" >> "$recent_file.tmp"
+    mv "$recent_file.tmp" "$recent_file"
+}
 
 launch_rom() {
     rom_path="$1"
@@ -74,11 +80,15 @@ launch_rom() {
         # Check system pak first
         if [ -f "$system_launch" ]; then
             echo "Launching from system pak..." >> "$DIR/log/launch.log"
-            exec "$system_launch" "$rom_path"
+            add_to_recent "$rom_path"
+            "$system_launch" "$rom_path"
+            return 2
         # Fall back to external pak
         elif [ -f "$external_launch" ]; then
             echo "Launching from external pak..." >> "$DIR/log/launch.log"
-            exec "$external_launch" "$rom_path"
+            add_to_recent "$rom_path"
+            "$external_launch" "$rom_path"
+            return 2
         else
             echo "Emulator not found in system or external paks" >> "$DIR/log/launch.log"
         fi
@@ -89,19 +99,13 @@ launch_rom() {
 }
 
 search_screen() {
-    # Show keyboard and get input
-    search_term="$("$DIR/bin/minui-keyboard-tg5040" --header "Enter ROM Search")"
+    search_term="$("$DIR/bin/minui-keyboard-tg5040" --header "Game Search" --hardware-status false)"
     exit_code=$?
 
-    # Handle Y button or MENU button (exit)
+    # Handle MENU button (exit)
     if [ "$exit_code" -eq 3 ]; then
         cleanup
         exit 0
-    fi
-
-    # Handle B button (back)
-    if [ "$exit_code" -eq 2 ]; then
-        return 2
     fi
 
     if [ -n "$search_term" ]; then
@@ -113,22 +117,28 @@ search_screen() {
         : > "$results_file"
         : > "$paths_file"
 
-        # Wait for cache if it's still building
-        while [ ! -f "$CACHE_FILE" ]; do
-            sleep 0.1
-        done
-
-        # Search using cache
-        grep -i "$search_term" "$CACHE_FILE" | sort -u > "$paths_file"
+        # Find ROMs and store results
+        find "$SDCARD_PATH/Roms" -type f \
+            ! -path "*.disabled/*" \
+            ! -name ".*" \
+            -iname "*$search_term*" > "$paths_file"
 
         # Generate display names from paths
         if [ -s "$paths_file" ]; then
             while IFS= read -r file; do
-                basename "${file%.*}" >> "$results_file"
+                clean_name=$(clean_rom_name "$file")
+                echo "$clean_name:$file" >> "$results_file"
             done < "$paths_file"
 
-            # Sort results (unique only)
-            sort -u "$results_file" -o "$results_file"
+            # Sort by clean name
+            sort -t: -k1 "$results_file" -o "$results_file"
+
+            # Split display names and paths
+            cut -d: -f1 "$results_file" > "$results_file.display"
+            cut -d: -f2 "$results_file" > "$paths_file.sorted"
+            mv "$results_file.display" "$results_file"
+            mv "$paths_file.sorted" "$paths_file"
+
             echo "Found $(wc -l < "$results_file") results" >> "$DIR/log/launch.log"
         else
             echo "No results found, try again" > "$results_file"
@@ -144,8 +154,9 @@ search_screen() {
         echo "Selected: $selected" >> "$DIR/log/launch.log"
         echo "List exit code: $list_exit" >> "$DIR/log/launch.log"
 
-        # Handle Y button or MENU button in list screen
+        # Handle MENU button in list (exit)
         if [ "$list_exit" -eq 3 ]; then
+            rm -f "$results_file" "$paths_file"
             cleanup
             exit 0
         fi
@@ -157,13 +168,16 @@ search_screen() {
                 return 2
             fi
 
-            # Find the matching ROM path
-            selected_path=$(grep "/$selected\." "$paths_file")
-            echo "Selected path: $selected_path" >> "$DIR/log/launch.log"
-            if [ -n "$selected_path" ]; then
-                rm -f "$results_file" "$paths_file"
-                launch_rom "$selected_path"
-                return $?
+            # Get the path from the same line number as the selection
+            selected_line=$(grep -n "^$selected$" "$results_file" | cut -d: -f1)
+            if [ -n "$selected_line" ]; then
+                selected_path=$(sed -n "${selected_line}p" "$paths_file")
+                echo "Selected path: $selected_path" >> "$DIR/log/launch.log"
+                if [ -n "$selected_path" ]; then
+                    rm -f "$results_file" "$paths_file"
+                    launch_rom "$selected_path"
+                    return $?
+                fi
             fi
         fi
 
@@ -173,6 +187,11 @@ search_screen() {
 
     return 2  # Return to search if empty search
 }
+
+# Build cache in background if needed
+if [ ! -f "$CACHE_FILE" ]; then
+    build_cache &
+fi
 
 # Main loop
 {
