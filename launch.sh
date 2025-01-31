@@ -120,6 +120,7 @@ search_screen() {
         # Find ROMs and store results
         find "$SDCARD_PATH/Roms" -type f \
             ! -path "*.disabled/*" \
+            ! -path "*/PORTS/*" \
             ! -name ".*" \
             -iname "*$search_term*" > "$paths_file"
 
