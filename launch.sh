@@ -34,6 +34,7 @@ export LOGS_PATH="$SDCARD_PATH/Logs"
 # Cache setup
 CACHE_DIR="$USERDATA_PATH/romsearch"
 CACHE_FILE="$CACHE_DIR/cache.txt"
+CACHE_READY="/tmp/rom_cache_ready"
 
 # Setup logging
 mkdir -p "$DIR/log"
@@ -218,16 +219,23 @@ search_screen() {
         : > "$results_file"
         : > "$paths_file"
 
+        # Check if cache is ready
+        if [ ! -f "$CACHE_READY" ]; then
+            show_message "Caching rom files..." forever &
+            loading_pid=$!
+            while [ ! -f "$CACHE_READY" ]; do
+                sleep 0.1
+            done
+            kill $loading_pid 2>/dev/null
+        fi
+
         # Show loading message
         show_message "Searching for '$search_term'..." forever &
         loading_pid=$!
 
-        # Find ROMs and store results
-        find "$SDCARD_PATH/Roms" -type f \
-            ! -path "*.disabled/*" \
-            ! -path "*/PORTS/*" \
-            ! -name ".*" \
-            -iname "*$search_term*" > "$paths_file"
+        # Use cache for search
+        echo "Using cache file for search" >> "$DIR/log/launch.log"
+        grep -i "$search_term" "$CACHE_FILE" > "$paths_file"
 
         # Generate display names from paths
         if [ -s "$paths_file" ]; then
@@ -271,13 +279,36 @@ search_screen() {
     return 2  # Return to search if empty search
 }
 
-# Build cache in background if needed
-if [ ! -f "$CACHE_FILE" ]; then
-    build_cache &
-fi
+build_cache() {
+    echo "Checking cache..." >> "$DIR/log/launch.log"
+    mkdir -p "$CACHE_DIR"
+
+    # Only rebuild if cache isn't ready
+    if [ ! -f "$CACHE_READY" ]; then
+        echo "Building cache..." >> "$DIR/log/launch.log"
+
+        # Process each console directory
+        for console_dir in "$SDCARD_PATH/Roms"/*; do
+            if [ -d "$console_dir" ] && \
+               [[ ! "$console_dir" =~ "PORTS" ]] && \
+               [[ ! "$console_dir" =~ ".disabled" ]]; then
+                # List files directly in the console directory
+                ls -1 "$console_dir"/*.* 2>/dev/null >> "$CACHE_FILE"
+            fi
+        done
+
+        echo "Cache build complete" >> "$DIR/log/launch.log"
+        touch "$CACHE_READY"
+    else
+        echo "Using existing cache" >> "$DIR/log/launch.log"
+    fi
+}
 
 # Main loop
 {
+    # Start cache building in background at startup
+    build_cache &
+
     while true; do
         search_screen
         exit_code=$?
