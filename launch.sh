@@ -12,7 +12,7 @@ cleanup() {
     jobs -p | xargs -r kill
 
     # Kill any lingering processes
-    pkill -f "build_cache"
+    killall -9 "build_cache"
 
     # Kill our parent process to ensure complete exit
     kill -9 $PPID
