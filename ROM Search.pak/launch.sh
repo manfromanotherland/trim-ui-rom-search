@@ -14,9 +14,6 @@ cleanup() {
     # Kill any lingering processes
     killall -9 "build_cache" 2>/dev/null || true
 
-    # Kill our parent process to ensure complete exit
-    kill -9 $PPID 2>/dev/null || true
-
     # Clear screen on exit
     clear
 }
@@ -107,9 +104,11 @@ launch_rom() {
             "$external_launch" "$rom_path"
             return 2
         else
+            show_message "Could not find '$emu' emulator!" 2
             echo "Emulator not found in system or external paks" >> "$DIR/log/launch.log"
         fi
     else
+        show_message "Could not find emulator name." 2
         echo "Could not extract emulator name!" >> "$DIR/log/launch.log"
     fi
     return 1
@@ -125,11 +124,11 @@ show_results_screen() {
     selected=$("$DIR/bin/minui-list-tg5040" \
         --file "$results_file" \
         --format text \
-        --header "$num_results search results for '$search_term'" \
+        --header "$num_results results for '$search_term'" \
         --confirm-button "A" \
-        --confirm-text "Open" \
+        --confirm-text "OPEN" \
         --cancel-button "B" \
-        --cancel-text "Back")
+        --cancel-text "BACK")
     list_exit=$?
     
     echo "Selected: $selected" >> "$DIR/log/launch.log"
@@ -144,11 +143,6 @@ show_results_screen() {
 
     # Handle selection
     if [ "$list_exit" -eq 0 ] && [ -n "$selected" ]; then
-        if [ "$selected" = "No results found, try again" ]; then
-            rm -f "$results_file" "$paths_file"
-            return 2
-        fi
-
         # Get the path from the same line number as the selection
         selected_line=$(grep -n "^$selected$" "$results_file" | cut -d: -f1)
         if [ -n "$selected_line" ]; then
@@ -200,7 +194,7 @@ search_screen() {
     last_search_term=${1:-""}
 
     search_term="$("$DIR/bin/minui-keyboard-tg5040" \
-        --header "Rom Search" \
+        --header "ROM Search" \
         --initial-value "$last_search_term")"
     exit_code=$?
 
@@ -211,6 +205,13 @@ search_screen() {
     fi
 
     if [ -n "$search_term" ]; then
+        # Check search term length
+        if [ ${#search_term} -le 2 ]; then
+            show_message "Minimum 3 characters needed!" 2
+            search_screen "$search_term"
+            return $?
+        fi
+
         # Create temporary file for results
         results_file="/tmp/rom_results.txt"
         paths_file="/tmp/rom_paths.txt"
@@ -221,7 +222,7 @@ search_screen() {
 
         # Check if cache is ready
         if [ ! -f "$CACHE_READY" ]; then
-            show_message "Caching rom files..." forever &
+            show_message "Caching ROM files..." forever &
             loading_pid=$!
             while [ ! -f "$CACHE_READY" ]; do
                 sleep 0.1
@@ -240,8 +241,10 @@ search_screen() {
         # Generate display names from paths
         if [ -s "$paths_file" ]; then
             while IFS= read -r file; do
+                parent_dir=$(dirname "$file")
+                emu=$(echo "$parent_dir" | sed -n 's/.*(\([^)]*\)).*/\1/p')
                 clean_name=$(clean_rom_name "$file")
-                echo "$clean_name:$file" >> "$results_file"
+                echo "$clean_name ($emu):$file" >> "$results_file"
             done < "$paths_file"
 
             # Sort by clean name
@@ -254,9 +257,19 @@ search_screen() {
             mv "$paths_file.sorted" "$paths_file"
 
             echo "Found $(wc -l < "$results_file") results" >> "$DIR/log/launch.log"
+
+            # Kill loading message
+            kill $loading_pid 2>/dev/null
+
+            show_results_screen "$search_term" "$results_file" "$paths_file"
         else
-            echo "No results found, try again" > "$results_file"
+            # Kill loading message
+            kill $loading_pid 2>/dev/null
+
             echo "No results found" >> "$DIR/log/launch.log"
+            show_message "No results found, try again!" 2
+            search_screen "$search_term"
+            return $?
         fi
 
         # Kill loading message
@@ -282,11 +295,11 @@ search_screen() {
 build_cache() {
     echo "Checking cache..." >> "$DIR/log/launch.log"
     mkdir -p "$CACHE_DIR"
-
+    
     # Only rebuild if cache isn't ready
     if [ ! -f "$CACHE_READY" ]; then
         echo "Building cache..." >> "$DIR/log/launch.log"
-
+        
         # Process each console directory
         for console_dir in "$SDCARD_PATH/Roms"/*; do
             if [ -d "$console_dir" ] && \
@@ -296,7 +309,7 @@ build_cache() {
                 ls -1 "$console_dir"/*.* 2>/dev/null >> "$CACHE_FILE"
             fi
         done
-
+        
         echo "Cache build complete" >> "$DIR/log/launch.log"
         touch "$CACHE_READY"
     else

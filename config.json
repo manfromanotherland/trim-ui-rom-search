@@ -1,6 +1,0 @@
-{
-    "label": "Rom Search",
-    "launch": "launch.sh",
-    "description": "Search for Roms",
-    "sortkey": "!2"
-}
