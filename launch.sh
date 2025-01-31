@@ -53,10 +53,26 @@ add_to_recent() {
     mkdir -p "$(dirname "$recent_file")"
     touch "$recent_file"
 
-    # Add new entry at the top
-    echo -e "${rom_path_rel}\t${display_name}" > "$recent_file.tmp"
-    cat "$recent_file" >> "$recent_file.tmp"
-    mv "$recent_file.tmp" "$recent_file"
+    # Check if the entry already exists
+    if grep -q -F "${rom_path_rel}" "$recent_file"; then
+        # If it's the first entry, do nothing
+        first_entry=$(head -n 1 "$recent_file")
+        if [ "$first_entry" == "${rom_path_rel}" ]; then
+            return
+        fi
+
+        # If somewhere on the list move it to the top
+        grep -v -F "${rom_path_rel}" "$recent_file" > "$recent_file.tmp"
+        {
+            echo -e "${rom_path_rel}\t${display_name}"
+            cat "$recent_file.tmp"
+        } > "$recent_file"
+    else
+        # Add new entry at the top
+        echo -e "${rom_path_rel}\t${display_name}" > "$recent_file.tmp"
+        cat "$recent_file" >> "$recent_file.tmp"
+        mv "$recent_file.tmp" "$recent_file"
+    fi
 }
 
 launch_rom() {
