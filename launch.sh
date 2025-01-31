@@ -9,13 +9,13 @@ cleanup() {
     rm -f /tmp/stay_awake
 
     # Kill any background processes we started
-    jobs -p | xargs -r kill
+    jobs -p | xargs -r kill 2>/dev/null || true
 
     # Kill any lingering processes
-    killall -9 "build_cache"
+    killall -9 "build_cache" 2>/dev/null || true
 
     # Kill our parent process to ensure complete exit
-    kill -9 $PPID
+    kill -9 $PPID 2>/dev/null || true
 
     # Clear screen on exit
     clear
@@ -165,6 +165,36 @@ show_results_screen() {
     return 1
 }
 
+show_message() {
+    message="$1"
+    seconds="$2"
+
+    if [ -z "$seconds" ]; then
+        seconds="forever"
+    fi
+
+    killall sdl2imgshow
+    echo "$message" 1>&2
+    if [ "$seconds" = "forever" ]; then
+        "$DIR/bin/sdl2imgshow" \
+            -i "$DIR/res/background.png" \
+            -f "$DIR/res/fonts/BPreplayBold.otf" \
+            -s 27 \
+            -c "220,220,220" \
+            -q \
+            -t "$message" >/dev/null 2>&1 &
+    else
+        "$DIR/bin/sdl2imgshow" \
+            -i "$DIR/res/background.png" \
+            -f "$DIR/res/fonts/BPreplayBold.otf" \
+            -s 27 \
+            -c "220,220,220" \
+            -q \
+            -t "$message" >/dev/null 2>&1
+        sleep "$seconds"
+    fi
+}
+
 search_screen() {
     last_search_term=${1:-""}
 
@@ -187,6 +217,10 @@ search_screen() {
         # Make sure files are empty
         : > "$results_file"
         : > "$paths_file"
+
+        # Show loading message
+        show_message "Searching for '$search_term'..." forever &
+        loading_pid=$!
 
         # Find ROMs and store results
         find "$SDCARD_PATH/Roms" -type f \
@@ -217,6 +251,8 @@ search_screen() {
             echo "No results found" >> "$DIR/log/launch.log"
         fi
 
+        # Kill loading message
+        kill $loading_pid 2>/dev/null
 
         show_results_screen "$search_term" "$results_file" "$paths_file"
         result=$?
