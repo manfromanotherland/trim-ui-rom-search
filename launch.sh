@@ -114,6 +114,57 @@ launch_rom() {
     return 1
 }
 
+show_results_screen() {
+    local search_term="$1"
+    local results_file="$2"
+    local paths_file="$3"
+
+    # Show results and capture selection
+    num_results=$(wc -l < "$results_file")
+    selected=$("$DIR/bin/minui-list-tg5040" \
+        --file "$results_file" \
+        --format text \
+        --header "$num_results search results for '$search_term'" \
+        --confirm-button "A" \
+        --confirm-text "Open" \
+        --cancel-button "B" \
+        --cancel-text "Back")
+    list_exit=$?
+    
+    echo "Selected: $selected" >> "$DIR/log/launch.log"
+    echo "List exit code: $list_exit" >> "$DIR/log/launch.log"
+
+    # Handle MENU button (exit)
+    if [ "$list_exit" -eq 3 ]; then
+        rm -f "$results_file" "$paths_file"
+        cleanup
+        exit 0
+    fi
+
+    # Handle selection
+    if [ "$list_exit" -eq 0 ] && [ -n "$selected" ]; then
+        if [ "$selected" = "No results found, try again" ]; then
+            rm -f "$results_file" "$paths_file"
+            return 2
+        fi
+
+        # Get the path from the same line number as the selection
+        selected_line=$(grep -n "^$selected$" "$results_file" | cut -d: -f1)
+        if [ -n "$selected_line" ]; then
+            selected_path=$(sed -n "${selected_line}p" "$paths_file")
+            if [ -n "$selected_path" ]; then
+                launch_rom "$selected_path"
+                # After game exits, show results again recursively
+                show_results_screen "$search_term" "$results_file" "$paths_file"
+                return $?
+            fi
+        fi
+    fi
+
+    # B button pressed, return to keyboard
+    return 1
+}
+
 search_screen() {
     last_search_term=${1:-""}
 
@@ -166,52 +217,19 @@ search_screen() {
             echo "No results found" >> "$DIR/log/launch.log"
         fi
 
-        # Show results and capture selection
-        num_results=$(wc -l < "$results_file")
-        selected=$("$DIR/bin/minui-list-tg5040" \
-            --file "$results_file" \
-            --format text \
-            --header "$num_results search results for ‘$search_term’" \
-            --confirm-button "A" \
-            --confirm-text "Open" \
-            --cancel-button "B" \
-            --cancel-text "Back")
-        list_exit=$?
-        echo "Selected: $selected" >> "$DIR/log/launch.log"
-        echo "List exit code: $list_exit" >> "$DIR/log/launch.log"
 
-        # Handle MENU button in list (exit)
-        if [ "$list_exit" -eq 3 ]; then
-            rm -f "$results_file" "$paths_file"
-            cleanup
-            exit 0
+        show_results_screen "$search_term" "$results_file" "$paths_file"
+        result=$?
+
+        if [ "$result" -eq 1 ]; then
+            # B button pressed, return to keyboard with same term
+            search_screen "$search_term"
+            return $?
+        elif [ "$result" -eq 2 ]; then
+            # No results found
+            search_screen "$search_term"
+            return $?
         fi
-
-        # Handle selection
-        if [ "$list_exit" -eq 0 ] && [ -n "$selected" ]; then
-            if [ "$selected" = "No results found, try again" ]; then
-                rm -f "$results_file" "$paths_file"
-                return 2
-            fi
-
-            # Get the path from the same line number as the selection
-            selected_line=$(grep -n "^$selected$" "$results_file" | cut -d: -f1)
-            if [ -n "$selected_line" ]; then
-                selected_path=$(sed -n "${selected_line}p" "$paths_file")
-                echo "Selected path: $selected_path" >> "$DIR/log/launch.log"
-
-                if [ -n "$selected_path" ]; then
-                    launch_rom "$selected_path"
-                    # After game exits, show results again using existing files
-                    search_screen "$search_term"  # Reuse the search term
-                    return $?
-                fi
-            fi
-        fi
-
-        # B button pressed in results, return to keyboard with same term
-        search_screen "$search_term"  # Keep the same search term
-        return $?
     fi
 
     return 2  # Return to search if empty search
