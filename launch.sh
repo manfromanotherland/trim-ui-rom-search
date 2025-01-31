@@ -183,16 +183,16 @@ search_screen() {
             if [ -n "$selected_line" ]; then
                 selected_path=$(sed -n "${selected_line}p" "$paths_file")
                 echo "Selected path: $selected_path" >> "$DIR/log/launch.log"
+
                 if [ -n "$selected_path" ]; then
-                    rm -f "$results_file" "$paths_file"
                     launch_rom "$selected_path"
+                    # After game exits, show results again using existing files
+                    search_screen "$search_term"  # Reuse the search term
                     return $?
                 fi
             fi
         fi
 
-        rm -f "$results_file" "$paths_file"
-        return $list_exit
         # B button pressed in results, return to keyboard with same term
         search_screen "$search_term"  # Keep the same search term
         return $?
