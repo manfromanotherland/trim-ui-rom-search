@@ -99,7 +99,11 @@ launch_rom() {
 }
 
 search_screen() {
-    search_term="$("$DIR/bin/minui-keyboard-tg5040" --header "Game Search" --hardware-status false)"
+    last_search_term=${1:-""}
+
+    search_term="$("$DIR/bin/minui-keyboard-tg5040" \
+        --header "Rom Search" \
+        --initial-value "$last_search_term")"
     exit_code=$?
 
     # Handle MENU button (exit)
@@ -184,6 +188,9 @@ search_screen() {
 
         rm -f "$results_file" "$paths_file"
         return $list_exit
+        # B button pressed in results, return to keyboard with same term
+        search_screen "$search_term"  # Keep the same search term
+        return $?
     fi
 
     return 2  # Return to search if empty search
